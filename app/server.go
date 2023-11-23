@@ -6,9 +6,44 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
+type StorageVal struct {
+	payload string
+	exp     int64
+}
+
+type Storage struct {
+	mu    sync.RWMutex
+	items map[string]StorageVal
+}
+
+func NewStorage() *Storage {
+	return &Storage{
+		items: make(map[string]StorageVal),
+	}
+}
+
+func (s *Storage) Get(key string) (StorageVal, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	val, ok := s.items[key]
+	return val, ok
+}
+
+func (s *Storage) Set(key, val string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items[key] = StorageVal{
+		payload: val,
+		exp:     0,
+	}
+}
+
 func main() {
+	storage := NewStorage()
+
 	l, err := net.Listen("tcp", "0.0.0.0:6379")
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
@@ -21,12 +56,12 @@ func main() {
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
 		} else {
-			go handleConnection(conn)
+			go handleConnection(conn, storage)
 		}
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, storage *Storage) {
 	defer conn.Close()
 	for {
 		line := readLine(conn)
@@ -34,7 +69,7 @@ func handleConnection(conn net.Conn) {
 		if len(line) < 1 {
 			continue
 		}
-		err, resp := handleLine(conn, line)
+		err, resp := handleLine(storage, conn, line)
 		if err != nil {
 			fmt.Println("Error for line: ", line, ", error: ", err.Error())
 		} else {
@@ -44,32 +79,52 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-func handleLine(conn net.Conn, line string) (error, string) {
+func handleLine(storage *Storage, conn net.Conn, line string) (error, string) {
 	if strings.HasPrefix(line, "*") {
 		sizeStr := line[1:]
 		size, err := strconv.Atoi(sizeStr)
 		if err != nil {
 			return err, ""
 		}
-		return handleArray(conn, size)
+		return handleArray(storage, conn, size)
 	}
 	return fmt.Errorf("Unknown line command '%s'", line), ""
 }
 
-func handleArray(conn net.Conn, size int) (error, string) {
+func handleArray(storage *Storage, conn net.Conn, size int) (error, string) {
 	commandSizeLine := readLine(conn)
 	fmt.Println("command size line: ", commandSizeLine)
-	commandLine := strings.ToLower(readLine(conn))
-	if commandLine == "ping" {
+	command := strings.ToLower(readLine(conn))
+	if command == "ping" {
 		return nil, "+PONG\r\n"
 	}
-	if commandLine == "echo" {
+	if command == "echo" {
 		echoStrSizeLine := readLine(conn)
 		fmt.Println("echo string size line: ", echoStrSizeLine)
 		echoArg := strings.ToLower(readLine(conn))
 		return nil, "+" + echoArg + "\r\n"
 	}
-	return fmt.Errorf("Unknown line command '%s'", commandLine), ""
+	if command == "set" {
+		keySizeLine := readLine(conn)
+		fmt.Println("key size line: ", keySizeLine)
+		key := readLine(conn)
+		valSizeLine := readLine(conn)
+		fmt.Println("val size line: ", valSizeLine)
+		val := readLine(conn)
+		storage.Set(key, val)
+		return nil, "+OK\r\n"
+	}
+	if command == "get" {
+		keySizeLine := readLine(conn)
+		fmt.Println("key size line: ", keySizeLine)
+		key := readLine(conn)
+		val, ok := storage.Get(key)
+		if !ok {
+			return nil, "$-1\r\n"
+		}
+		return nil, "$" + strconv.Itoa(len(val.payload)) + "\r\n" + val.payload + "\r\n"
+	}
+	return fmt.Errorf("Unknown line command '%s'", command), ""
 }
 
 func readLine(conn net.Conn) string {
