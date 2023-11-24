@@ -5,11 +5,14 @@ import (
 )
 
 func TestParseRedisDB(t *testing.T) {
-	// expected := map[string]string{"foo": "1", "bar": "2"}
-	expected := map[string]string{"foo": "bar"}
+	expected := map[string]string{"fruit": "apple", "foo": "bar"}
 	result, err := ParseRedisDb("./dump.rdb", 0)
 	if err != nil {
 		t.Fatalf("Failed to parse Redis DB: %s", err)
+	}
+
+	if len(result) != len(expected) {
+		t.Fatalf("Expected %d keys, got %d", len(expected), len(result))
 	}
 
 	for key, val := range expected {

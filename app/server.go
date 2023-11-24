@@ -129,6 +129,7 @@ func handleArray(storage *storage.Storage, args Args, conn net.Conn, size int) (
 		}
 		return fmt.Errorf("Unknown config subcommand '%s'", getOrSet), ""
 	}
+	// assume this is checking the dump file
 	if command == "keys" {
 		patternSize := readLine(conn)
 		fmt.Println("patternSize: ", patternSize)
@@ -144,6 +145,7 @@ func handleArray(storage *storage.Storage, args Args, conn net.Conn, size int) (
 		}
 		return nil, accum
 	}
+	// maybe memory, maybe dump file
 	if command == "get" {
 		keySizeLine := readLine(conn)
 		fmt.Println("key size line: ", keySizeLine)

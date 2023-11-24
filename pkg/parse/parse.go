@@ -71,10 +71,12 @@ func parseKeys(file *os.File) (map[string]string, error) {
 		return parseKeys(file)
 	}
 
-	// size of hash table
-	if firstByte != byte(1) {
-		return nil, fmt.Errorf("expected single entry hash table for this step")
-	}
+	entriesCount := int(firstByte)
+
+	// // size of hash table
+	// if firstByte != byte(1) {
+	// 	return nil, fmt.Errorf("expected single entry hash table for this step")
+	// }
 
 	// skip "size of expires hash table"
 	n, err = file.Read(buffer)
@@ -82,53 +84,15 @@ func parseKeys(file *os.File) (map[string]string, error) {
 		return nil, fmt.Errorf("failed to read size of expires hash table")
 	}
 
-	// what is this byte?
-	n, err = file.Read(buffer)
-	if n < 1 || err != nil {
-		return nil, fmt.Errorf("failed to read wtf byte")
-	}
-
 	parsed := make(map[string]string)
 
-	n, err = file.Read(buffer)
-	if n < 1 || err != nil {
-		return nil, fmt.Errorf("failed to read key length byte")
-	}
-
-	if Left_2_bits(buffer[0]) != byte(0) {
-		return nil, fmt.Errorf("expected 0b00 for first two bits of key length")
-	}
-
-	keyLength := Right_6_bits(buffer[0])
-	key := ""
-	for i := 0; i < int(keyLength); i++ {
-		n, err = file.Read(buffer)
-		if n < 1 || err != nil {
-			return nil, fmt.Errorf("failed to read part of key")
+	for i := 0; i < entriesCount; i++ {
+		key, val, err := readEntry(file)
+		if err != nil {
+			return parsed, err
 		}
-		key += string(buffer[0])
+		parsed[key] = val
 	}
-
-	n, err = file.Read(buffer)
-	if n < 1 || err != nil {
-		return nil, fmt.Errorf("failed to read val length byte")
-	}
-
-	if Left_2_bits(buffer[0]) != byte(0) {
-		return nil, fmt.Errorf("expected 0b00 for first two bits of value length")
-	}
-
-	valLength := Right_6_bits(buffer[0])
-	val := ""
-	for i := 0; i < int(valLength); i++ {
-		n, err = file.Read(buffer)
-		if n < 1 || err != nil {
-			return nil, fmt.Errorf("failed to read part of key")
-		}
-		val += string(buffer[0])
-	}
-
-	parsed[key] = val
 
 	// if firstByte == EXP_M || firstByte == EXP_S {
 	// 	return nil, fmt.Errorf("expiring keys not supported")
@@ -165,6 +129,56 @@ func parseKeys(file *os.File) (map[string]string, error) {
 	// }
 
 	return parsed, nil
+}
+
+func readEntry(file *os.File) (string, string, error) {
+	buffer := make([]byte, 1)
+
+	// what is this byte?
+	n, err := file.Read(buffer)
+	if n < 1 || err != nil {
+		return "", "", fmt.Errorf("failed to read wtf byte")
+	}
+
+	n, err = file.Read(buffer)
+	if n < 1 || err != nil {
+		return "", "", fmt.Errorf("failed to read key length byte")
+	}
+
+	if Left_2_bits(buffer[0]) != byte(0) {
+		return "", "", fmt.Errorf("expected 0b00 for first two bits of key length")
+	}
+
+	keyLength := Right_6_bits(buffer[0])
+	key := ""
+	for i := 0; i < int(keyLength); i++ {
+		n, err = file.Read(buffer)
+		if n < 1 || err != nil {
+			return "", "", fmt.Errorf("failed to read part of key")
+		}
+		key += string(buffer[0])
+	}
+
+	n, err = file.Read(buffer)
+	if n < 1 || err != nil {
+		return "", "", fmt.Errorf("failed to read val length byte")
+	}
+
+	if Left_2_bits(buffer[0]) != byte(0) {
+		return "", "", fmt.Errorf("expected 0b00 for first two bits of value length")
+	}
+
+	valLength := Right_6_bits(buffer[0])
+	val := ""
+	for i := 0; i < int(valLength); i++ {
+		n, err = file.Read(buffer)
+		if n < 1 || err != nil {
+			return "", "", fmt.Errorf("failed to read part of key")
+		}
+		val += string(buffer[0])
+	}
+
+	return key, val, nil
 }
 
 func Left_2_bits(b byte) byte {
