@@ -96,7 +96,7 @@ func parseKeys(file *os.File) (map[string]string, error) {
 	}
 
 	if Left_2_bits(buffer[0]) != byte(0) {
-		return nil, fmt.Errorf("expected 0b00 for first two bits")
+		return nil, fmt.Errorf("expected 0b00 for first two bits of key length")
 	}
 
 	keyLength := Right_6_bits(buffer[0])
@@ -109,7 +109,26 @@ func parseKeys(file *os.File) (map[string]string, error) {
 		key += string(buffer[0])
 	}
 
-	parsed[key] = ""
+	n, err = file.Read(buffer)
+	if n < 1 || err != nil {
+		return nil, fmt.Errorf("failed to read val length byte")
+	}
+
+	if Left_2_bits(buffer[0]) != byte(0) {
+		return nil, fmt.Errorf("expected 0b00 for first two bits of value length")
+	}
+
+	valLength := Right_6_bits(buffer[0])
+	val := ""
+	for i := 0; i < int(valLength); i++ {
+		n, err = file.Read(buffer)
+		if n < 1 || err != nil {
+			return nil, fmt.Errorf("failed to read part of key")
+		}
+		val += string(buffer[0])
+	}
+
+	parsed[key] = val
 
 	// if firstByte == EXP_M || firstByte == EXP_S {
 	// 	return nil, fmt.Errorf("expiring keys not supported")

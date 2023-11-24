@@ -150,11 +150,21 @@ func handleArray(storage *storage.Storage, args Args, conn net.Conn, size int) (
 		key := readLine(conn)
 		val, ok := storage.Get(key)
 		if !ok {
+			// early stages read from memory but the rdb extension uses the dump file
+			if args.filename != "" {
+				d, err := args.GetDumpFile()
+				if err == nil {
+					stored, storedOk := d[key]
+					if storedOk {
+						return nil, "$" + strconv.Itoa(len(stored)) + "\r\n" + stored + "\r\n"
+					}
+				}
+			}
 			return nil, "$-1\r\n"
 		}
 		return nil, "$" + strconv.Itoa(len(val.Payload)) + "\r\n" + val.Payload + "\r\n"
 	}
-	return fmt.Errorf("Unknown line command '%s'", command), ""
+	return fmt.Errorf("unknown line command '%s'", command), ""
 }
 
 func readLine(conn net.Conn) string {
