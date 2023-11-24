@@ -1,102 +1,26 @@
 package main
 
 import (
+	"codecrafters-redis-go/pkg/storage"
 	"fmt"
 	"net"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 )
 
-type StorageVal struct {
-	payload string
-	exp     int64
-}
-
-type Storage struct {
-	mu    sync.RWMutex
-	items map[string]StorageVal
-}
-
-func NewStorage() *Storage {
-	return &Storage{
-		items: make(map[string]StorageVal),
-	}
-}
-
-func (s *Storage) Get(key string) (StorageVal, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	val, ok := s.items[key]
-	fmt.Println("Get key: ", key, ", val: ", val.payload, ", exp: ", val.exp, ", ok: ", ok)
-	if !ok {
-		fmt.Println("missing")
-		return StorageVal{}, false
-	}
-	if val.exp == int64(0) {
-		fmt.Println("no exp")
-		return val, true
-	}
-	now := time.Now().UnixMilli()
-	fmt.Println("now: ", now)
-	if now > val.exp {
-		fmt.Println("expired")
-		delete(s.items, key)
-		return StorageVal{}, false
-	}
-	fmt.Println("current")
-	return val, true
-}
-
-func (s *Storage) Set(key, payload string, expiresIn int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	exp := int64(0)
-	now := time.Now().UnixMilli()
-	fmt.Println("expiresIn: ", expiresIn)
-	fmt.Println("now: ", now)
-	if expiresIn > int64(0) {
-		exp = now + expiresIn
-	}
-	fmt.Println("Set key: ", key, ", payload: ", payload, ", exp: ", exp)
-	s.items[key] = StorageVal{
-		payload,
-		exp,
-	}
-}
-
-func (s *Storage) Del(key string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.items, key)
-}
-
-type DbFile struct {
-	dir      string
-	filename string
-}
-
 func main() {
-	storage := NewStorage()
+	storage := storage.NewStorage()
+	args := GetArgs()
 
-	dbFile := DbFile{
-		dir:      ".",
-		filename: "dump.rdb",
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "6379"
 	}
 
-	for i, arg := range os.Args {
-		if arg == "--dir" || arg == "-d" {
-			dbFile.dir = os.Args[i+1]
-		} else if arg == "--dbfilename" || arg == "-f" {
-			dbFile.filename = os.Args[i+1]
-		}
-	}
-
-	l, err := net.Listen("tcp", "0.0.0.0:6379")
+	l, err := net.Listen("tcp", "0.0.0.0:"+port)
 	if err != nil {
-		fmt.Println("Failed to bind to port 6379")
+		fmt.Println("Failed to bind to port: ", port)
 		os.Exit(1)
 	}
 	defer l.Close()
@@ -106,12 +30,12 @@ func main() {
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
 		} else {
-			go handleConnection(conn, storage, dbFile)
+			go handleConnection(conn, storage, args)
 		}
 	}
 }
 
-func handleConnection(conn net.Conn, storage *Storage, dbFile DbFile) {
+func handleConnection(conn net.Conn, storage *storage.Storage, args Args) {
 	defer conn.Close()
 	for {
 		line := readLine(conn)
@@ -119,7 +43,7 @@ func handleConnection(conn net.Conn, storage *Storage, dbFile DbFile) {
 		if len(line) < 1 {
 			continue
 		}
-		err, resp := handleLine(storage, dbFile, conn, line)
+		err, resp := handleLine(storage, args, conn, line)
 		if err != nil {
 			fmt.Println("Error for line: ", line, ", error: ", err.Error())
 		} else {
@@ -129,19 +53,19 @@ func handleConnection(conn net.Conn, storage *Storage, dbFile DbFile) {
 	}
 }
 
-func handleLine(storage *Storage, dbFile DbFile, conn net.Conn, line string) (error, string) {
+func handleLine(storage *storage.Storage, args Args, conn net.Conn, line string) (error, string) {
 	if strings.HasPrefix(line, "*") {
 		sizeStr := line[1:]
 		size, err := strconv.Atoi(sizeStr)
 		if err != nil {
 			return err, ""
 		}
-		return handleArray(storage, dbFile, conn, size)
+		return handleArray(storage, args, conn, size)
 	}
 	return fmt.Errorf("Unknown line command '%s'", line), ""
 }
 
-func handleArray(storage *Storage, dbFile DbFile, conn net.Conn, size int) (error, string) {
+func handleArray(storage *storage.Storage, args Args, conn net.Conn, size int) (error, string) {
 	fmt.Println("handleArray size: ", size)
 	commandSizeLine := readLine(conn)
 	fmt.Println("command size line: ", commandSizeLine)
@@ -196,10 +120,10 @@ func handleArray(storage *Storage, dbFile DbFile, conn net.Conn, size int) (erro
 		fmt.Println("key: ", key)
 		if getOrSet == "get" {
 			if key == "dbfilename" {
-				return nil, "*2\r\n$10\r\ndbfilename\r\n$" + (strconv.Itoa(len(dbFile.filename))) + "\r\n" + dbFile.filename + "\r\n"
+				return nil, "*2\r\n$10\r\ndbfilename\r\n$" + (strconv.Itoa(len(args.filename))) + "\r\n" + args.filename + "\r\n"
 			}
 			if key == "dir" {
-				return nil, "*2\r\n$3\r\ndir\r\n$" + (strconv.Itoa(len(dbFile.dir))) + "\r\n" + dbFile.dir + "\r\n"
+				return nil, "*2\r\n$3\r\ndir\r\n$" + (strconv.Itoa(len(args.dir))) + "\r\n" + args.dir + "\r\n"
 			}
 			return fmt.Errorf("Unknown config key '%s'", key), ""
 		}
@@ -213,7 +137,7 @@ func handleArray(storage *Storage, dbFile DbFile, conn net.Conn, size int) (erro
 		if !ok {
 			return nil, "$-1\r\n"
 		}
-		return nil, "$" + strconv.Itoa(len(val.payload)) + "\r\n" + val.payload + "\r\n"
+		return nil, "$" + strconv.Itoa(len(val.Payload)) + "\r\n" + val.Payload + "\r\n"
 	}
 	return fmt.Errorf("Unknown line command '%s'", command), ""
 }
