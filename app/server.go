@@ -23,19 +23,6 @@ func main() {
 		fmt.Println("port override: ", port)
 	}
 
-	now := time.Now().Unix()
-	nowStr := os.Getenv("NOW")
-	if nowStr != "" {
-		if nowOverride, err := strconv.Atoi(nowStr); err == nil {
-			fmt.Println("now override: ", nowOverride)
-			now = int64(nowOverride)
-		} else {
-			fmt.Println("Failed to parse NOW env var: ", err.Error())
-		}
-	} else {
-		fmt.Println("now: ", now)
-	}
-
 	if err := parse.DebugPrintRedisDb(args.GetDumpFileRaw(), "| "); err != nil {
 		fmt.Println("Failed to parse Redis DB: ", err.Error())
 	}
@@ -52,12 +39,12 @@ func main() {
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
 		} else {
-			go handleConnection(conn, storage, now, args)
+			go handleConnection(conn, storage, args)
 		}
 	}
 }
 
-func handleConnection(conn net.Conn, storage *storage.Storage, now int64, args Args) {
+func handleConnection(conn net.Conn, storage *storage.Storage, args Args) {
 	defer conn.Close()
 	for {
 		line := readLine(conn)
@@ -65,7 +52,7 @@ func handleConnection(conn net.Conn, storage *storage.Storage, now int64, args A
 		if len(line) < 1 {
 			continue
 		}
-		err, resp := handleLine(storage, args, conn, now, line)
+		err, resp := handleLine(storage, args, conn, line)
 		if err != nil {
 			fmt.Println("Error for line: ", line, ", error: ", err.Error())
 		} else {
@@ -75,19 +62,19 @@ func handleConnection(conn net.Conn, storage *storage.Storage, now int64, args A
 	}
 }
 
-func handleLine(storage *storage.Storage, args Args, conn net.Conn, now int64, line string) (error, string) {
+func handleLine(storage *storage.Storage, args Args, conn net.Conn, line string) (error, string) {
 	if strings.HasPrefix(line, "*") {
 		sizeStr := line[1:]
 		size, err := strconv.Atoi(sizeStr)
 		if err != nil {
 			return err, ""
 		}
-		return handleArray(storage, args, conn, now, size)
+		return handleArray(storage, args, conn, size)
 	}
 	return fmt.Errorf("Unknown line command '%s'", line), ""
 }
 
-func handleArray(storage *storage.Storage, args Args, conn net.Conn, now int64, size int) (error, string) {
+func handleArray(storage *storage.Storage, args Args, conn net.Conn, size int) (error, string) {
 	fmt.Println("handleArray size: ", size)
 	commandSizeLine := readLine(conn)
 	fmt.Println("command size line: ", commandSizeLine)
@@ -157,6 +144,7 @@ func handleArray(storage *storage.Storage, args Args, conn net.Conn, now int64, 
 		fmt.Println("patternSize: ", patternSize)
 		pattern := readLine(conn)
 		fmt.Println("pattern: ", pattern)
+		now := time.Now().Unix()
 		d, err := args.GetDumpFile(now)
 		if err != nil {
 			return err, ""
@@ -177,6 +165,7 @@ func handleArray(storage *storage.Storage, args Args, conn net.Conn, now int64, 
 			// early stages read from memory but the rdb extension uses the dump file
 			if args.filename != "" {
 				fmt.Println("key not found in memory, checking dump file")
+				now := time.Now().Unix()
 				d, err := args.GetDumpFile(now)
 				if err == nil {
 					fmt.Println("got dump file")
