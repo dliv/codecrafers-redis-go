@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type StorageVal struct {
@@ -29,16 +30,47 @@ func (s *Storage) Get(key string) (StorageVal, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	val, ok := s.items[key]
-	return val, ok
+	fmt.Println("Get key: ", key, ", val: ", val.payload, ", exp: ", val.exp, ", ok: ", ok)
+	if !ok {
+		fmt.Println("missing")
+		return StorageVal{}, false
+	}
+	if val.exp == int64(0) {
+		fmt.Println("no exp")
+		return val, true
+	}
+	now := time.Now().UnixMilli()
+	fmt.Println("now: ", now)
+	if now > val.exp {
+		fmt.Println("expired")
+		delete(s.items, key)
+		return StorageVal{}, false
+	}
+	fmt.Println("current")
+	return val, true
 }
 
-func (s *Storage) Set(key, val string) {
+func (s *Storage) Set(key, payload string, expiresIn int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.items[key] = StorageVal{
-		payload: val,
-		exp:     0,
+	exp := int64(0)
+	now := time.Now().UnixMilli()
+	fmt.Println("expiresIn: ", expiresIn)
+	fmt.Println("now: ", now)
+	if expiresIn > int64(0) {
+		exp = now + expiresIn
 	}
+	fmt.Println("Set key: ", key, ", payload: ", payload, ", exp: ", exp)
+	s.items[key] = StorageVal{
+		payload,
+		exp,
+	}
+}
+
+func (s *Storage) Del(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.items, key)
 }
 
 func main() {
@@ -92,6 +124,7 @@ func handleLine(storage *Storage, conn net.Conn, line string) (error, string) {
 }
 
 func handleArray(storage *Storage, conn net.Conn, size int) (error, string) {
+	fmt.Println("handleArray size: ", size)
 	commandSizeLine := readLine(conn)
 	fmt.Println("command size line: ", commandSizeLine)
 	command := strings.ToLower(readLine(conn))
@@ -106,12 +139,32 @@ func handleArray(storage *Storage, conn net.Conn, size int) (error, string) {
 	}
 	if command == "set" {
 		keySizeLine := readLine(conn)
-		fmt.Println("key size line: ", keySizeLine)
+		fmt.Println("key size: ", keySizeLine)
 		key := readLine(conn)
+		fmt.Println("key: ", key)
 		valSizeLine := readLine(conn)
-		fmt.Println("val size line: ", valSizeLine)
+		fmt.Println("val size: ", valSizeLine)
 		val := readLine(conn)
-		storage.Set(key, val)
+		fmt.Println("val: ", val)
+		expiresIn := int64(0)
+		if size == 5 {
+			subcommandSize := readLine(conn)
+			fmt.Println("subcommand size: ", subcommandSize)
+			subcommand := readLine(conn)
+			fmt.Println("subcommand size: ", subcommand)
+			subcommandValSize := readLine(conn)
+			fmt.Println("subcommandVal size: ", subcommandValSize)
+			subcommandVal := readLine(conn)
+			fmt.Println("subcommandVal: ", subcommandVal)
+			if subcommand == "px" || subcommand == "PX" {
+				expiresInRaw, err := strconv.Atoi(subcommandVal)
+				if err != nil {
+					return err, ""
+				}
+				expiresIn = int64(expiresInRaw)
+			}
+		}
+		storage.Set(key, val, expiresIn)
 		return nil, "+OK\r\n"
 	}
 	if command == "get" {
