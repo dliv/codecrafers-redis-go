@@ -112,7 +112,7 @@ func parseKeys(file *os.File, nowUnixMs int64) (map[string]storage.StorageVal, e
 			fmt.Println("error in entry: ", i)
 			return parsed, err
 		}
-		if val.Exp == int64(0) || nowUnixMs < val.Exp {
+		if val.Exp == int64(0) || nowUnixMs <= val.Exp {
 			fmt.Println("key ", key, " not expired, Exp: ", val.Exp, ", now: ", nowUnixMs)
 			parsed[key] = val
 		} else {
@@ -205,7 +205,7 @@ func readExpMillis(file *os.File) (int64, error) {
 		return int64(0), fmt.Errorf("failed to read exp millis byte")
 	}
 	exp := binary.LittleEndian.Uint64(buffer)
-	scaled := exp / 1_000
+	scaled := exp // / 1_000
 	return int64(scaled), nil
 }
 

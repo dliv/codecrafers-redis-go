@@ -144,7 +144,8 @@ func handleArray(storage *storage.Storage, args Args, conn net.Conn, size int) (
 		fmt.Println("patternSize: ", patternSize)
 		pattern := readLine(conn)
 		fmt.Println("pattern: ", pattern)
-		now := time.Now().Unix()
+		now := time.Now().UnixMilli()
+
 		d, err := args.GetDumpFile(now)
 		if err != nil {
 			return err, ""
@@ -164,8 +165,8 @@ func handleArray(storage *storage.Storage, args Args, conn net.Conn, size int) (
 		if !ok {
 			// early stages read from memory but the rdb extension uses the dump file
 			if args.filename != "" {
-				fmt.Println("key not found in memory, checking dump file")
-				now := time.Now().Unix()
+				fmt.Println("checking dump file")
+				now := time.Now().UnixMilli()
 				d, err := args.GetDumpFile(now)
 				if err == nil {
 					fmt.Println("got dump file")
