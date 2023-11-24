@@ -129,6 +129,21 @@ func handleArray(storage *storage.Storage, args Args, conn net.Conn, size int) (
 		}
 		return fmt.Errorf("Unknown config subcommand '%s'", getOrSet), ""
 	}
+	if command == "keys" {
+		patternSize := readLine(conn)
+		fmt.Println("patternSize: ", patternSize)
+		pattern := readLine(conn)
+		fmt.Println("pattern: ", pattern)
+		d, err := args.GetDumpFile()
+		if err != nil {
+			return err, ""
+		}
+		accum := "*" + strconv.Itoa(len(d)) + "\r\n"
+		for k := range d {
+			accum += "$" + strconv.Itoa(len(k)) + "\r\n" + k + "\r\n"
+		}
+		return nil, accum
+	}
 	if command == "get" {
 		keySizeLine := readLine(conn)
 		fmt.Println("key size line: ", keySizeLine)

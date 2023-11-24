@@ -1,9 +1,11 @@
 package main
 
 import (
+	"codecrafters-redis-go/pkg/parse"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Args struct {
@@ -31,4 +33,15 @@ func GetArgs() Args {
 		}
 	}
 	return args
+}
+
+func (args Args) GetDumpFile() (map[string]string, error) {
+	dir := args.dir
+	if dir == "" {
+		dir = "./"
+	} else if !strings.HasSuffix(dir, "/") {
+		dir += "/"
+	}
+	path := dir + args.filename
+	return parse.ParseRedisDb(path, args.dbNum)
 }
