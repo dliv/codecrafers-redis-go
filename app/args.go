@@ -2,6 +2,7 @@ package main
 
 import (
 	"codecrafters-redis-go/pkg/parse"
+	"codecrafters-redis-go/pkg/storage"
 	"fmt"
 	"os"
 	"strconv"
@@ -35,7 +36,7 @@ func GetArgs() Args {
 	return args
 }
 
-func (args Args) GetDumpFile() (map[string]string, error) {
+func (args Args) GetDumpFileRaw() string {
 	dir := args.dir
 	if dir == "" {
 		dir = "./"
@@ -43,5 +44,10 @@ func (args Args) GetDumpFile() (map[string]string, error) {
 		dir += "/"
 	}
 	path := dir + args.filename
-	return parse.ParseRedisDb(path, args.dbNum)
+	return path
+}
+
+func (args Args) GetDumpFile(now int64) (map[string]storage.StorageVal, error) {
+	path := args.GetDumpFileRaw()
+	return parse.ParseRedisDb(path, args.dbNum, now)
 }

@@ -1,6 +1,8 @@
 package parse
 
 import (
+	"codecrafters-redis-go/pkg/storage"
+	"encoding/binary"
 	"fmt"
 	"os"
 )
@@ -11,7 +13,28 @@ const EOF = 0xFF
 const EXP_S = 0xFD
 const EXP_M = 0xFC
 
-func ParseRedisDb(dbPath string, dbNum int) (map[string]string, error) {
+func DebugPrintRedisDb(dbPath, prefix string) error {
+	file, err := os.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	buffer := make([]byte, 1)
+	for {
+		n, err := file.Read(buffer)
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			debug_byte(prefix, buffer[0])
+		} else {
+			return nil
+		}
+	}
+}
+
+func ParseRedisDb(dbPath string, dbNum int, nowUnixMs int64) (map[string]storage.StorageVal, error) {
 	// lock ? someone could write while we're reading - append only?
 	file, err := os.Open(dbPath)
 	if err != nil {
@@ -33,7 +56,7 @@ func ParseRedisDb(dbPath string, dbNum int) (map[string]string, error) {
 				at_select = false
 				if buffer[0] == byte(dbNum) {
 					fmt.Println("SELECTED DB: ", dbNum, " found at idx: ", idx)
-					return parseKeys(file)
+					return parseKeys(file, nowUnixMs)
 				}
 			} else if buffer[0] == DB_SELECT {
 				at_select = true
@@ -54,7 +77,7 @@ func debug_byte(prefix string, b byte) {
 	fmt.Printf("%s%c %3d %02x %08b\n", prefix, char, b, b, b)
 }
 
-func parseKeys(file *os.File) (map[string]string, error) {
+func parseKeys(file *os.File, nowUnixMs int64) (map[string]storage.StorageVal, error) {
 	buffer := make([]byte, 1)
 	n, err := file.Read(buffer)
 	if n < 1 {
@@ -68,15 +91,12 @@ func parseKeys(file *os.File) (map[string]string, error) {
 	debug_byte("\t", firstByte)
 	if firstByte == RESIZE {
 		fmt.Println("RESIZED")
-		return parseKeys(file)
+		return parseKeys(file, nowUnixMs)
 	}
 
 	entriesCount := int(firstByte)
 
-	// // size of hash table
-	// if firstByte != byte(1) {
-	// 	return nil, fmt.Errorf("expected single entry hash table for this step")
-	// }
+	fmt.Println("entriesCount: ", entriesCount)
 
 	// skip "size of expires hash table"
 	n, err = file.Read(buffer)
@@ -84,69 +104,61 @@ func parseKeys(file *os.File) (map[string]string, error) {
 		return nil, fmt.Errorf("failed to read size of expires hash table")
 	}
 
-	parsed := make(map[string]string)
+	parsed := make(map[string]storage.StorageVal)
 
 	for i := 0; i < entriesCount; i++ {
 		key, val, err := readEntry(file)
 		if err != nil {
+			fmt.Println("error in entry: ", i)
 			return parsed, err
 		}
-		parsed[key] = val
+		if val.Exp == int64(0) || nowUnixMs < val.Exp {
+			fmt.Println("key ", key, " not expired, Exp: ", val.Exp, ", now: ", nowUnixMs)
+			parsed[key] = val
+		} else {
+			fmt.Println("EXPIRED key: ", key, ", Exp: ", val.Exp, ", now: ", nowUnixMs)
+		}
 	}
-
-	// if firstByte == EXP_M || firstByte == EXP_S {
-	// 	return nil, fmt.Errorf("expiring keys not supported")
-	// }
-
-	// if Left_2_bits(firstByte) != byte(3) {
-	// 	return nil, fmt.Errorf("expected 0b11 for first two bits")
-	// }
-
-	// format := Right_6_bits(firstByte)
-	// if format == byte(0) {
-	// 	return nil, fmt.Errorf("format 8-bit int not supported yet")
-	// } else if format == byte(1) {
-	// 	return nil, fmt.Errorf("format 16-bit int not supported yet")
-	// } else if format == byte(2) {
-	// 	return nil, fmt.Errorf("format 32-bit int not supported yet")
-	// } else if format == byte(3) {
-	// 	return nil, fmt.Errorf("format LZF not supported yet")
-	// }
-
-	// for {
-	// 	n, err := file.Read(buffer)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	if n < 1 {
-	// 		return parsed, nil
-	// 	}
-	// 	b := buffer[0]
-	// 	debug_byte("\t", b)
-	// 	if b == DB_SELECT || b == EOF {
-	// 		return parsed, nil
-	// 	}
-	// }
 
 	return parsed, nil
 }
 
-func readEntry(file *os.File) (string, string, error) {
+func readEntry(file *os.File) (string, storage.StorageVal, error) {
 	buffer := make([]byte, 1)
 
-	// what is this byte?
+	// TODO: parse out seconds expiration if applicable
+	exp := int64(0)
+
 	n, err := file.Read(buffer)
+	firstByte := buffer[0]
 	if n < 1 || err != nil {
-		return "", "", fmt.Errorf("failed to read wtf byte")
+		return "", storage.StorageVal{}, fmt.Errorf("failed to read entry's first byte")
+	}
+
+	if firstByte == EXP_M {
+		exp, err = readExpMillis(file)
+		if err != nil {
+			return "", storage.StorageVal{}, err
+		}
+
+		// not sure what this extra byte is
+		n, err := file.Read(buffer)
+		if n < 1 || err != nil {
+			return "", storage.StorageVal{}, fmt.Errorf("failed to read extra byte after exp millis")
+		}
+	}
+
+	if firstByte == EXP_S {
+		return "", storage.StorageVal{}, fmt.Errorf("expiring keys with seconds not supported")
 	}
 
 	n, err = file.Read(buffer)
 	if n < 1 || err != nil {
-		return "", "", fmt.Errorf("failed to read key length byte")
+		return "", storage.StorageVal{}, fmt.Errorf("failed to read key length byte")
 	}
 
 	if Left_2_bits(buffer[0]) != byte(0) {
-		return "", "", fmt.Errorf("expected 0b00 for first two bits of key length")
+		return "", storage.StorageVal{}, fmt.Errorf("expected 0b00 for first two bits of key length")
 	}
 
 	keyLength := Right_6_bits(buffer[0])
@@ -154,18 +166,18 @@ func readEntry(file *os.File) (string, string, error) {
 	for i := 0; i < int(keyLength); i++ {
 		n, err = file.Read(buffer)
 		if n < 1 || err != nil {
-			return "", "", fmt.Errorf("failed to read part of key")
+			return "", storage.StorageVal{}, fmt.Errorf("failed to read part of key")
 		}
 		key += string(buffer[0])
 	}
 
 	n, err = file.Read(buffer)
 	if n < 1 || err != nil {
-		return "", "", fmt.Errorf("failed to read val length byte")
+		return "", storage.StorageVal{}, fmt.Errorf("failed to read val length byte")
 	}
 
 	if Left_2_bits(buffer[0]) != byte(0) {
-		return "", "", fmt.Errorf("expected 0b00 for first two bits of value length")
+		return "", storage.StorageVal{}, fmt.Errorf("expected 0b00 for first two bits of value length")
 	}
 
 	valLength := Right_6_bits(buffer[0])
@@ -173,16 +185,32 @@ func readEntry(file *os.File) (string, string, error) {
 	for i := 0; i < int(valLength); i++ {
 		n, err = file.Read(buffer)
 		if n < 1 || err != nil {
-			return "", "", fmt.Errorf("failed to read part of key")
+			return "", storage.StorageVal{}, fmt.Errorf("failed to read part of key")
 		}
 		val += string(buffer[0])
 	}
 
-	return key, val, nil
+	sv := storage.StorageVal{
+		Payload: val,
+		Exp:     exp,
+	}
+
+	return key, sv, nil
+}
+
+func readExpMillis(file *os.File) (int64, error) {
+	buffer := make([]byte, 8)
+	n, err := file.Read(buffer)
+	if n < 8 || err != nil {
+		return int64(0), fmt.Errorf("failed to read exp millis byte")
+	}
+	exp := binary.LittleEndian.Uint64(buffer)
+	scaled := exp / 1_000
+	return int64(scaled), nil
 }
 
 func Left_2_bits(b byte) byte {
-	return b & 0b11_00_00_00 >> 6
+	return b >> 6
 }
 
 func Right_6_bits(b byte) byte {

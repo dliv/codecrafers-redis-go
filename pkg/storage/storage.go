@@ -35,7 +35,7 @@ func (s *Storage) Get(key string) (StorageVal, bool) {
 		fmt.Println("no exp")
 		return val, true
 	}
-	now := time.Now().UnixMilli()
+	now := time.Now().Unix()
 	fmt.Println("now: ", now)
 	if now > val.Exp {
 		fmt.Println("expired")
@@ -50,7 +50,7 @@ func (s *Storage) Set(key, payload string, expiresIn int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	exp := int64(0)
-	now := time.Now().UnixMilli()
+	now := time.Now().Unix()
 	fmt.Println("expiresIn: ", expiresIn)
 	fmt.Println("now: ", now)
 	if expiresIn > int64(0) {
