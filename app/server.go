@@ -73,8 +73,26 @@ func (s *Storage) Del(key string) {
 	delete(s.items, key)
 }
 
+type DbFile struct {
+	dir      string
+	filename string
+}
+
 func main() {
 	storage := NewStorage()
+
+	dbFile := DbFile{
+		dir:      ".",
+		filename: "dump.rdb",
+	}
+
+	for i, arg := range os.Args {
+		if arg == "--dir" || arg == "-d" {
+			dbFile.dir = os.Args[i+1]
+		} else if arg == "--dbfilename" || arg == "-f" {
+			dbFile.filename = os.Args[i+1]
+		}
+	}
 
 	l, err := net.Listen("tcp", "0.0.0.0:6379")
 	if err != nil {
@@ -88,12 +106,12 @@ func main() {
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
 		} else {
-			go handleConnection(conn, storage)
+			go handleConnection(conn, storage, dbFile)
 		}
 	}
 }
 
-func handleConnection(conn net.Conn, storage *Storage) {
+func handleConnection(conn net.Conn, storage *Storage, dbFile DbFile) {
 	defer conn.Close()
 	for {
 		line := readLine(conn)
@@ -101,7 +119,7 @@ func handleConnection(conn net.Conn, storage *Storage) {
 		if len(line) < 1 {
 			continue
 		}
-		err, resp := handleLine(storage, conn, line)
+		err, resp := handleLine(storage, dbFile, conn, line)
 		if err != nil {
 			fmt.Println("Error for line: ", line, ", error: ", err.Error())
 		} else {
@@ -111,19 +129,19 @@ func handleConnection(conn net.Conn, storage *Storage) {
 	}
 }
 
-func handleLine(storage *Storage, conn net.Conn, line string) (error, string) {
+func handleLine(storage *Storage, dbFile DbFile, conn net.Conn, line string) (error, string) {
 	if strings.HasPrefix(line, "*") {
 		sizeStr := line[1:]
 		size, err := strconv.Atoi(sizeStr)
 		if err != nil {
 			return err, ""
 		}
-		return handleArray(storage, conn, size)
+		return handleArray(storage, dbFile, conn, size)
 	}
 	return fmt.Errorf("Unknown line command '%s'", line), ""
 }
 
-func handleArray(storage *Storage, conn net.Conn, size int) (error, string) {
+func handleArray(storage *Storage, dbFile DbFile, conn net.Conn, size int) (error, string) {
 	fmt.Println("handleArray size: ", size)
 	commandSizeLine := readLine(conn)
 	fmt.Println("command size line: ", commandSizeLine)
@@ -166,6 +184,26 @@ func handleArray(storage *Storage, conn net.Conn, size int) (error, string) {
 		}
 		storage.Set(key, val, expiresIn)
 		return nil, "+OK\r\n"
+	}
+	if command == "config" {
+		getOrSetSize := readLine(conn)
+		fmt.Println("getOrSet size: ", getOrSetSize)
+		getOrSet := readLine(conn)
+		fmt.Println("getOrSet: ", getOrSet)
+		keySize := readLine(conn)
+		fmt.Println("key size: ", keySize)
+		key := readLine(conn)
+		fmt.Println("key: ", key)
+		if getOrSet == "get" {
+			if key == "dbfilename" {
+				return nil, "*2\r\n$10\r\ndbfilename\r\n$" + (strconv.Itoa(len(dbFile.filename))) + "\r\n" + dbFile.filename + "\r\n"
+			}
+			if key == "dir" {
+				return nil, "*2\r\n$3\r\ndir\r\n$" + (strconv.Itoa(len(dbFile.dir))) + "\r\n" + dbFile.dir + "\r\n"
+			}
+			return fmt.Errorf("Unknown config key '%s'", key), ""
+		}
+		return fmt.Errorf("Unknown config subcommand '%s'", getOrSet), ""
 	}
 	if command == "get" {
 		keySizeLine := readLine(conn)
