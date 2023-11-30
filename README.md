@@ -1,3 +1,9 @@
+# codecrafters-redis-go
+
+A horrible, minimal Go implementation of some Redis features for [CodeCrafters.io](https://app.codecrafters.io).
+
+---
+
 [![progress-banner](https://backend.codecrafters.io/progress/redis/e8a6de6d-f581-4f46-83ed-4d023e48f14d)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
 
 This is a starting point for Go solutions to the
